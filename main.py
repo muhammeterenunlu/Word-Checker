@@ -1,30 +1,50 @@
-from transformers import BertTokenizer, BertForMaskedLM
-import torch
 from spellchecker import SpellChecker
+import string
 
-# Model ve tokenize ediciyi yükle
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-model = BertForMaskedLM.from_pretrained('bert-base-uncased').eval()
-spell = SpellChecker()
-
-def correct_with_bert(sentence):
-    words = sentence.split()
-    corrected_sentence = sentence
-
+def split_text(text):
+    words = text.split()
+    cleaned_words = []
     for word in words:
-        # SpellChecker ile kontrol edelim
-        if spell.unknown([word]):
-            masked_sentence = corrected_sentence.replace(word, "[MASK]", 1)  # Sadece ilk rastladığımızı değiştiriyoruz
-            tokenized = tokenizer(masked_sentence, return_tensors="pt")
-            with torch.no_grad():
-                output = model(**tokenized)
-            predictions = output.logits[0][tokenized["input_ids"][0] == tokenizer.mask_token_id]
-            predicted_token = torch.argmax(predictions).item()
-            corrected_sentence = corrected_sentence.replace(word, tokenizer.decode([predicted_token]), 1)  # İlk rastladığımızı değiştiriyoruz
+        is_title = word.istitle()
+        cleaned_word = word.strip(string.punctuation).lower()
+        cleaned_words.append((cleaned_word, is_title))
+    return cleaned_words
 
-    return corrected_sentence
+def correct_word_txt(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        content = file.read()
 
-text = """Hello everyone. My name is Jon. I'm from the Unites States. I have a deadline for my assignment tomorrow. I'm tring to finish it in time. By the way, I went to the Clifornia last summer. It was a wonderful trip. The pacific can is so beautiful."""
+    spell = SpellChecker(language='en')
+    words = split_text(content)
+    unique_words = {word[0] for word in words}
+    misspelled = spell.unknown(unique_words)
 
-corrected_text = correct_with_bert(text)
-print(corrected_text)
+    corrections_log = []
+
+    for word_tuple in words:
+        word = word_tuple[0]
+        is_title = word_tuple[1]
+
+        if word in misspelled:
+            correction = spell.correction(word)
+
+            # Eğer kelime cümlede büyük harfle başlıyorsa, düzeltmeyi büyük harfle yapalım
+            if is_title:
+                word = word.capitalize()
+                correction = correction.capitalize()
+
+            corrections_log.append(f"'{word}' -> '{correction}'")
+            content = content.replace(word, correction)
+
+    corrected_file_path = "corrected_" + file_path
+    with open(corrected_file_path, 'w', encoding='utf-8') as file:
+        file.write(content)
+
+    return corrected_file_path, corrections_log
+
+corrected_path, corrections = correct_word_txt("test.txt")
+
+print(f"Corrections made and the new file saved at: {corrected_path}\n")
+print("Corrections:")
+for entry in corrections:
+    print(entry)
