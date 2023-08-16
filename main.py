@@ -1,58 +1,30 @@
-import spacy
-import string
-from docx import Document
+from transformers import BertTokenizer, BertForMaskedLM
+import torch
 from spellchecker import SpellChecker
 
-#
-# SpaCy modelini yükleme
-nlp = spacy.load("en_core_web_sm")
+# Model ve tokenize ediciyi yükle
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+model = BertForMaskedLM.from_pretrained('bert-base-uncased').eval()
+spell = SpellChecker()
 
-def split_text(text):
-    words = text.split()
-    cleaned_words = []
+def correct_with_bert(sentence):
+    words = sentence.split()
+    corrected_sentence = sentence
+
     for word in words:
-        cleaned_word = word.strip(string.punctuation)
-        cleaned_words.append(cleaned_word.lower())  # Küçük harfe dönüştürülüyor
-    return cleaned_words
+        # SpellChecker ile kontrol edelim
+        if spell.unknown([word]):
+            masked_sentence = corrected_sentence.replace(word, "[MASK]", 1)  # Sadece ilk rastladığımızı değiştiriyoruz
+            tokenized = tokenizer(masked_sentence, return_tensors="pt")
+            with torch.no_grad():
+                output = model(**tokenized)
+            predictions = output.logits[0][tokenized["input_ids"][0] == tokenizer.mask_token_id]
+            predicted_token = torch.argmax(predictions).item()
+            corrected_sentence = corrected_sentence.replace(word, tokenizer.decode([predicted_token]), 1)  # İlk rastladığımızı değiştiriyoruz
 
-def extract_proper_nouns(text):
-    """Metinden özel isimleri çıkarma."""
-    doc = nlp(text)
-    return [token.text for token in doc if token.pos_ == "PROPN"]
+    return corrected_sentence
 
-def correct_word_doc(file_path):
-    doc = Document(file_path)
-    spell = SpellChecker(language='en')
+text = """Hello everyone. My name is Jon. I'm from the Unites States. I have a deadline for my assignment tomorrow. I'm tring to finish it in time. By the way, I went to the Clifornia last summer. It was a wonderful trip. The pacific can is so beautiful."""
 
-    corrections_log = []
-
-    for paragraph in doc.paragraphs:
-        proper_nouns = extract_proper_nouns(paragraph.text)
-        words = split_text(paragraph.text)
-        misspelled = spell.unknown(words)
-
-        for word in misspelled:
-            if word in proper_nouns or word.capitalize() in proper_nouns:  # Özel isimleri atla
-                continue
-
-            correction = spell.correction(word)
-            if word.istitle():
-                correction = correction.capitalize()
-
-            corrections_log.append(f"'{word}' -> '{correction}'")
-
-            for run in paragraph.runs:
-                if word in run.text:
-                    run.text = run.text.replace(word, correction)
-
-    corrected_file_path = "corrected_" + file_path
-    doc.save(corrected_file_path)
-
-    return corrected_file_path, corrections_log
-
-corrected_path, corrections = correct_word_doc("test.docx")
-
-print(f"Corrections made and the new file saved at: {corrected_path}\n")
-print("Corrections:")
-for entry in corrections:
-    print(entry)
+corrected_text = correct_with_bert(text)
+print(corrected_text)
