@@ -1,2 +1,2 @@
 # Word-Checker
-Word Checker Using SpellChecker and SpaCy
+Word Checker Using SpellChecker
